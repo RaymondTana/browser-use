@@ -50,6 +50,15 @@
 
 </br>
 
+# 🧈 Butter Fork
+
+This fork includes the following changes:
+- Modified message history handling to be append-only.
+
+For the original project, see [upstream repository](https://github.com/browser-use/browser-use). The original repository was forked on Oct 21, 2025.
+
+---
+
 # 🤖 LLM Quickstart
 
 1. Direct your favorite coding agent (Cursor, ClaudeS, etc) to [Agents.md](https://docs.browser-use.com/llms-full.txt)
