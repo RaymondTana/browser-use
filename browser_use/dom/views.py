@@ -396,8 +396,7 @@ class EnhancedDOMTreeNode:
 		"""
 		Returns all children nodes, including shadow roots
 		"""
-		# IMPORTANT: Make a copy to avoid mutating the original children_nodes list!
-		children = list(self.children_nodes) if self.children_nodes else []
+		children = self.children_nodes or []
 		if self.shadow_roots:
 			children.extend(self.shadow_roots)
 		return children

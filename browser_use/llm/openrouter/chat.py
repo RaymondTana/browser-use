@@ -102,7 +102,7 @@ class ChatOpenRouter(BaseChatModel):
 		prompt_details = getattr(response.usage, 'prompt_tokens_details', None)
 		cached_tokens = prompt_details.cached_tokens if prompt_details else None
 
-		return ChatInvokeUsage(
+		usage = ChatInvokeUsage(
 			prompt_tokens=response.usage.prompt_tokens,
 			prompt_cached_tokens=cached_tokens,
 			prompt_cache_creation_tokens=None,
@@ -111,6 +111,8 @@ class ChatOpenRouter(BaseChatModel):
 			completion_tokens=response.usage.completion_tokens,
 			total_tokens=response.usage.total_tokens,
 		)
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -188,11 +190,15 @@ class ChatOpenRouter(BaseChatModel):
 					)
 				usage = self._get_usage(response)
 
-				parsed = output_format.model_validate_json(response.choices[0].message.content)
+				# Store raw JSON content before parsing
+				raw_json_content = response.choices[0].message.content
+
+				parsed = output_format.model_validate_json(raw_json_content)
 
 				return ChatInvokeCompletion(
 					completion=parsed,
 					usage=usage,
+					raw_content=raw_json_content
 				)
 
 		except RateLimitError as e:

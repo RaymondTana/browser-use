@@ -147,7 +147,7 @@ class ChatAWSBedrock(BaseChatModel):
 			return None
 
 		usage_data = response['usage']
-		return ChatInvokeUsage(
+		usage = ChatInvokeUsage(
 			prompt_tokens=usage_data.get('inputTokens', 0),
 			completion_tokens=usage_data.get('outputTokens', 0),
 			total_tokens=usage_data.get('totalTokens', 0),
@@ -155,6 +155,8 @@ class ChatAWSBedrock(BaseChatModel):
 			prompt_cache_creation_tokens=None,
 			prompt_image_tokens=None,
 		)
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -228,7 +230,8 @@ class ChatAWSBedrock(BaseChatModel):
 					response_text = '\n'.join(text_content) if text_content else ''
 					return ChatInvokeCompletion(
 						completion=response_text,
-						usage=usage,
+						# usage=usage,
+						usage = None
 					)
 				else:
 					# Handle structured output from tool calls
@@ -238,19 +241,27 @@ class ChatAWSBedrock(BaseChatModel):
 							tool_input = tool_use.get('input', {})
 
 							try:
+								# Store raw JSON content before parsing
+								raw_json_content = json.dumps(tool_input) if not isinstance(tool_input, str) else tool_input
+
 								# Validate and return the structured output
 								return ChatInvokeCompletion(
 									completion=output_format.model_validate(tool_input),
-									usage=usage,
+									# usage=usage,
+									usage = None,
+									raw_content=raw_json_content
 								)
 							except Exception as e:
 								# If validation fails, try to parse as JSON first
 								if isinstance(tool_input, str):
 									try:
+										raw_json_content = tool_input
 										data = json.loads(tool_input)
 										return ChatInvokeCompletion(
 											completion=output_format.model_validate(data),
-											usage=usage,
+											# usage=usage,
+											usage = None,
+											raw_content=raw_json_content
 										)
 									except json.JSONDecodeError:
 										pass
@@ -269,7 +280,8 @@ class ChatAWSBedrock(BaseChatModel):
 			if output_format is None:
 				return ChatInvokeCompletion(
 					completion='',
-					usage=usage,
+					# usage=usage,
+					usage = None
 				)
 			else:
 				raise ModelProviderError(

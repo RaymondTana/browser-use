@@ -136,7 +136,8 @@ class ChatOpenAI(BaseChatModel):
 		else:
 			usage = None
 
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -197,7 +198,8 @@ class ChatOpenAI(BaseChatModel):
 				usage = self._get_usage(response)
 				return ChatInvokeCompletion(
 					completion=response.choices[0].message.content or '',
-					usage=usage,
+					# usage=usage,
+					usage = None
 				)
 
 			else:
@@ -234,11 +236,16 @@ class ChatOpenAI(BaseChatModel):
 
 				usage = self._get_usage(response)
 
-				parsed = output_format.model_validate_json(response.choices[0].message.content)
+				# Store the raw JSON content before parsing
+				raw_json_content = response.choices[0].message.content
+
+				parsed = output_format.model_validate_json(raw_json_content)
 
 				return ChatInvokeCompletion(
 					completion=parsed,
-					usage=usage,
+					# usage=usage,
+					usage = None,
+					raw_content=raw_json_content
 				)
 
 		except RateLimitError as e:

@@ -71,8 +71,6 @@ class AgentMessagePrompt:
 		self,
 		browser_state_summary: 'BrowserStateSummary',
 		file_system: 'FileSystem',
-		agent_history_description: str | None = None,
-		read_state_description: str | None = None,
 		task: str | None = None,
 		include_attributes: list[str] | None = None,
 		step_info: Optional['AgentStepInfo'] = None,
@@ -87,8 +85,6 @@ class AgentMessagePrompt:
 	):
 		self.browser_state: 'BrowserStateSummary' = browser_state_summary
 		self.file_system: 'FileSystem | None' = file_system
-		self.agent_history_description: str | None = agent_history_description
-		self.read_state_description: str | None = read_state_description
 		self.task: str | None = task
 		self.include_attributes = include_attributes
 		self.step_info = step_info
@@ -187,7 +183,7 @@ class AgentMessagePrompt:
 		if page_stats['images'] > 0:
 			stats_text += f', {page_stats["images"]} images'
 		stats_text += f', {page_stats["total_elements"]} total elements'
-		stats_text += '</page_stats>\n'
+		stats_text += '</page_stats>\n\n'
 
 		elements_text = self.browser_state.dom_state.llm_representation(include_attributes=self.include_attributes)
 
@@ -246,10 +242,16 @@ class AgentMessagePrompt:
 		# Otherwise, don't mark any tab as current to avoid confusion
 		current_target_id = current_tab_candidates[0] if len(current_tab_candidates) == 1 else None
 
+		# <CHANGE>
+		count = 0
 		for tab in self.browser_state.tabs:
-			tabs_text += f'Tab {tab.target_id[-4:]}: {tab.url} - {tab.title[:30]}\n'
+			# tabs_text += f'Tab {tab.target_id[-4:]}: {tab.url} - {tab.title[:30]}\n'
+			tabs_text += f'Tab {count}: {tab.url} - {tab.title[:30]}\n'
+			count += 1
 
-		current_tab_text = f'Current tab: {current_target_id[-4:]}' if current_target_id is not None else ''
+		current_tab_text = f'Current tab: {0}' if current_target_id is not None else ''
+
+		# </CHANGE>
 
 		# Check if current page is a PDF viewer and add appropriate message
 		pdf_message = ''
@@ -268,23 +270,23 @@ class AgentMessagePrompt:
 Available tabs:
 {tabs_text}
 {page_info_text}
-{recent_events_text}{pdf_message}Interactive elements{truncated_text}:
+{recent_events_text}{pdf_message}Elements you can interact with inside the viewport{truncated_text}:
 {elements_text}
 """
 		return browser_state
 
 	def _get_agent_state_description(self) -> str:
 		if self.step_info:
-			step_info_description = f'Step{self.step_info.step_number + 1} maximum:{self.step_info.max_steps}\n'
+			step_info_description = f'Step {self.step_info.step_number + 1}. Maximum steps: {self.step_info.max_steps}\n'
 		else:
 			step_info_description = ''
 
 		time_str = datetime.now().strftime('%Y-%m-%d')
-		step_info_description += f'Today:{time_str}'
+		step_info_description += f'Current date: {time_str}'
 
 		_todo_contents = self.file_system.get_todo_contents() if self.file_system else ''
 		if not len(_todo_contents):
-			_todo_contents = '[empty todo.md, fill it when applicable]'
+			_todo_contents = '[Current todo.md is empty, fill it with your plan when applicable]'
 
 		agent_state = f"""
 <user_request>
@@ -298,12 +300,12 @@ Available tabs:
 </todo_contents>
 """
 		if self.sensitive_data:
-			agent_state += f'<sensitive_data>{self.sensitive_data}</sensitive_data>\n'
+			agent_state += f'<sensitive_data>\n{self.sensitive_data}\n</sensitive_data>\n'
 
-		agent_state += f'<step_info>{step_info_description}</step_info>\n'
+		agent_state += f'<step_info>\n{step_info_description}\n</step_info>\n'
 		if self.available_file_paths:
 			available_file_paths_text = '\n'.join(self.available_file_paths)
-			agent_state += f'<available_file_paths>{available_file_paths_text}\nUse with absolute paths</available_file_paths>\n'
+			agent_state += f'<available_file_paths>\n{available_file_paths_text}\nUse absolute full paths when referencing these files.\n</available_file_paths>\n'
 		return agent_state
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='get_user_message')
@@ -318,18 +320,9 @@ Available tabs:
 		):
 			use_vision = False
 
-		# Build complete state description
-		state_description = (
-			'<agent_history>\n'
-			+ (self.agent_history_description.strip('\n') if self.agent_history_description else '')
-			+ '\n</agent_history>\n\n'
-		)
-		state_description += '<agent_state>\n' + self._get_agent_state_description().strip('\n') + '\n</agent_state>\n'
+		# Build complete state description (no agent_history or read_state - those are now in message history)
+		state_description = '<agent_state>\n' + self._get_agent_state_description().strip('\n') + '\n</agent_state>\n'
 		state_description += '<browser_state>\n' + self._get_browser_state_description().strip('\n') + '\n</browser_state>\n'
-		# Only add read_state if it has content
-		read_state_description = self.read_state_description.strip('\n').strip() if self.read_state_description else ''
-		if read_state_description:
-			state_description += '<read_state>\n' + read_state_description + '\n</read_state>\n'
 
 		if self.page_filtered_actions:
 			state_description += '<page_specific_actions>\n'

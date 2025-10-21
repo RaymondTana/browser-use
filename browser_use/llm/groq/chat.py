@@ -97,7 +97,8 @@ class ChatGroq(BaseChatModel):
 			if response.usage is not None
 			else None
 		)
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -178,12 +179,16 @@ class ChatGroq(BaseChatModel):
 				model=self.name,
 			)
 
-		parsed_response = output_format.model_validate_json(response.choices[0].message.content)
+		# Store raw JSON content before parsing
+		raw_json_content = response.choices[0].message.content
+
+		parsed_response = output_format.model_validate_json(raw_json_content)
 		usage = self._get_usage(response)
 
 		return ChatInvokeCompletion(
 			completion=parsed_response,
 			usage=usage,
+			raw_content=raw_json_content
 		)
 
 	async def _invoke_with_tool_calling(self, groq_messages, output_format: type[T], schema) -> ChatCompletion:

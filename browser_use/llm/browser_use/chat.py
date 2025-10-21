@@ -32,37 +32,31 @@ class ChatBrowserUse(BaseChatModel):
 	Usage:
 		agent = Agent(
 			task="Find the number of stars of the browser-use repo",
-			llm=ChatBrowserUse(model='bu-latest'),
+			llm=ChatBrowserUse(),
 		)
 	"""
 
 	def __init__(
 		self,
-		model: str = 'bu-latest',
+		fast: bool = False,
 		api_key: str | None = None,
 		base_url: str | None = None,
 		timeout: float = 120.0,
-		**kwargs,
 	):
 		"""
 		Initialize ChatBrowserUse client.
 
 		Args:
-			model: Model name to use. Options: 'bu-latest', 'bu-1-0'. Defaults to 'bu-latest'.
+			fast: If True, uses fast model. If False, uses smart model.
 			api_key: API key for browser-use cloud. Defaults to BROWSER_USE_API_KEY env var.
 			base_url: Base URL for the API. Defaults to BROWSER_USE_LLM_URL env var or production URL.
 			timeout: Request timeout in seconds.
 		"""
-		# Validate model name
-		valid_models = ['bu-latest', 'bu-1-0']
-		if model not in valid_models:
-			raise ValueError(f"Invalid model: '{model}'. Must be one of {valid_models}")
-
-		self.model = 'bu-1-0' if model == 'bu-latest' else model  # must update on new model releases
-		self.fast = False
+		self.fast = fast
 		self.api_key = api_key or os.getenv('BROWSER_USE_API_KEY')
 		self.base_url = base_url or os.getenv('BROWSER_USE_LLM_URL', 'https://llm.api.browser-use.com')
 		self.timeout = timeout
+		self.model = 'fast' if fast else 'smart'
 
 		if not self.api_key:
 			raise ValueError(
@@ -76,17 +70,21 @@ class ChatBrowserUse(BaseChatModel):
 
 	@property
 	def name(self) -> str:
-		return self.model
+		return f'browser-use/{self.model}'
 
 	@overload
-	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
+	async def ainvoke(
+		self, messages: list[BaseMessage], output_format: None = None, prompt_description: str | None = None
+	) -> ChatInvokeCompletion[str]: ...
 
 	@overload
-	async def ainvoke(self, messages: list[BaseMessage], output_format: type[T]) -> ChatInvokeCompletion[T]: ...
+	async def ainvoke(
+		self, messages: list[BaseMessage], output_format: type[T], prompt_description: str | None = None
+	) -> ChatInvokeCompletion[T]: ...
 
 	@observe(name='chat_browser_use_ainvoke')
 	async def ainvoke(
-		self, messages: list[BaseMessage], output_format: type[T] | None = None
+		self, messages: list[BaseMessage], output_format: type[T] | None = None, prompt_description: str | None = None
 	) -> ChatInvokeCompletion[T] | ChatInvokeCompletion[str]:
 		"""
 		Send request to browser-use cloud API.
@@ -94,6 +92,7 @@ class ChatBrowserUse(BaseChatModel):
 		Args:
 			messages: List of messages to send
 			output_format: Expected output format (Pydantic model)
+			prompt_description: Action descriptions for the prompt (optional)
 
 		Returns:
 			ChatInvokeCompletion with structured response and usage info
@@ -107,6 +106,14 @@ class ChatBrowserUse(BaseChatModel):
 		# Add output format schema if provided
 		if output_format is not None:
 			payload['output_format'] = output_format.model_json_schema()
+
+		# Add prompt description if provided
+		logger.debug(
+			f'🔍 ChatBrowserUse received prompt_description: {prompt_description is not None}, length: {len(prompt_description) if prompt_description else 0}'
+		)
+		if prompt_description is not None:
+			payload['prompt_description'] = prompt_description
+			logger.debug('Added prompt_description to payload')
 
 		# Make API request
 		async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -156,6 +163,10 @@ class ChatBrowserUse(BaseChatModel):
 					f'📥 Got structured data from service: {list(completion_data.keys()) if isinstance(completion_data, dict) else type(completion_data)}'
 				)
 
+				# Store raw JSON content before parsing
+				import json
+				raw_json_content = json.dumps(completion_data) if isinstance(completion_data, dict) else str(completion_data)
+
 				# Convert action dicts to ActionModel instances if needed
 				# llm-use returns dicts to avoid validation with empty ActionModel
 				if isinstance(completion_data, dict) and 'action' in completion_data:
@@ -172,6 +183,7 @@ class ChatBrowserUse(BaseChatModel):
 				completion = output_format.model_validate(completion_data)
 			else:
 				completion = result['completion']
+				raw_json_content = None
 
 			# Parse usage info
 			usage = None
@@ -182,7 +194,9 @@ class ChatBrowserUse(BaseChatModel):
 
 		return ChatInvokeCompletion(
 			completion=completion,
-			usage=usage,
+			# usage=usage,
+			usage = None,
+			raw_content=raw_json_content
 		)
 
 	def _serialize_message(self, message: BaseMessage) -> dict:

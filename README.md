@@ -53,7 +53,8 @@
 # 🧈 Butter Fork
 
 This fork includes the following changes:
-- Modified message history handling to be append-only.
+- Modified message history handling to be append-only
+- Added `example/butter_caching_example.py` to show how to cache with Butter while using Browser Use
 
 For the original project, see [upstream repository](https://github.com/browser-use/browser-use). The original repository was forked on Oct 21, 2025.
 

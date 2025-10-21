@@ -43,3 +43,6 @@ class ChatInvokeCompletion(BaseModel, Generic[T]):
 
 	usage: ChatInvokeUsage | None
 	"""The usage of the response."""
+
+	raw_content: str | None = None
+	"""The raw content from the LLM response before parsing (for append-only history)"""

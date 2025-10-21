@@ -70,5 +70,6 @@ TOOL_CHANGES_SUMMARY.md
 
 
 claude-code-todo
-result_judge.md
-result.md
+
+# Test
+*.ipynb

@@ -78,7 +78,7 @@ class ChatGoogle(BaseChatModel):
 	top_p: float | None = None
 	seed: int | None = None
 	thinking_budget: int | None = None  # for gemini-2.5 flash and flash-lite models, default will be set to 0
-	max_output_tokens: int | None = 4096
+	max_output_tokens: int | None = 8192
 	config: types.GenerateContentConfigDict | None = None
 	include_system_in_user: bool = False
 	supports_structured_output: bool = True  # New flag
@@ -161,7 +161,8 @@ class ChatGoogle(BaseChatModel):
 				prompt_image_tokens=image_tokens,
 			)
 
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -245,7 +246,8 @@ class ChatGoogle(BaseChatModel):
 
 					return ChatInvokeCompletion(
 						completion=text,
-						usage=usage,
+						# usage=usage,
+						usage = None
 					)
 
 				else:
@@ -287,10 +289,15 @@ class ChatGoogle(BaseChatModel):
 										self.logger.debug('🔧 Stripped ``` wrapper from response')
 
 									# Parse the JSON text and validate with the Pydantic model
+									# Store raw JSON content before parsing
+									raw_json_content = text
+
 									parsed_data = json.loads(text)
 									return ChatInvokeCompletion(
 										completion=output_format.model_validate(parsed_data),
-										usage=usage,
+										# usage=usage,
+										usage = None,
+										raw_content=raw_json_content
 									)
 								except (json.JSONDecodeError, ValueError) as e:
 									self.logger.error(f'❌ Failed to parse JSON response: {str(e)}')
@@ -309,16 +316,21 @@ class ChatGoogle(BaseChatModel):
 								)
 
 						# Ensure we return the correct type
+						# Store raw JSON content before parsing
+						raw_json_content = json.dumps(response.parsed) if not isinstance(response.parsed, str) else response.parsed
+
 						if isinstance(response.parsed, output_format):
 							return ChatInvokeCompletion(
 								completion=response.parsed,
 								usage=usage,
+								raw_content=raw_json_content
 							)
 						else:
 							# If it's not the expected type, try to validate it
 							return ChatInvokeCompletion(
 								completion=output_format.model_validate(response.parsed),
 								usage=usage,
+								raw_content=raw_json_content
 							)
 					else:
 						# Fallback: Request JSON in the prompt for models without native JSON mode
@@ -365,10 +377,14 @@ class ChatGoogle(BaseChatModel):
 									text = text[3:-3].strip()
 
 								# Parse and validate
+								# Store raw JSON content before parsing
+								raw_json_content = text
+
 								parsed_data = json.loads(text)
 								return ChatInvokeCompletion(
 									completion=output_format.model_validate(parsed_data),
 									usage=usage,
+									raw_content=raw_json_content
 								)
 							except (json.JSONDecodeError, ValueError) as e:
 								self.logger.error(f'❌ Failed to parse fallback JSON: {str(e)}')

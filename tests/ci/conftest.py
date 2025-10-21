@@ -203,11 +203,12 @@ def mock_llm():
 
 @pytest.fixture(scope='function')
 def agent_with_cloud(browser_session, mock_llm, cloud_sync):
-	"""Create agent (cloud_sync parameter removed)."""
+	"""Create agent with cloud sync enabled (using real CloudSync)."""
 	agent = Agent(
 		task='Test task',
 		llm=mock_llm,
 		browser_session=browser_session,
+		cloud_sync=cloud_sync,
 	)
 	return agent
 

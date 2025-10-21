@@ -144,7 +144,8 @@ class ChatAnthropicBedrock(ChatAWSBedrock):
 			prompt_cache_creation_tokens=response.usage.cache_creation_input_tokens,
 			prompt_image_tokens=None,
 		)
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -218,14 +219,22 @@ class ChatAnthropicBedrock(ChatAWSBedrock):
 					if hasattr(content_block, 'type') and content_block.type == 'tool_use':
 						# Parse the tool input as the structured output
 						try:
-							return ChatInvokeCompletion(completion=output_format.model_validate(content_block.input), usage=usage)
+							# Store raw JSON content before parsing
+							raw_json_content = json.dumps(content_block.input) if not isinstance(content_block.input, str) else content_block.input
+							return ChatInvokeCompletion(
+								completion=output_format.model_validate(content_block.input),
+								usage=usage,
+								raw_content=raw_json_content
+							)
 						except Exception as e:
 							# If validation fails, try to parse it as JSON first
 							if isinstance(content_block.input, str):
+								raw_json_content = content_block.input
 								data = json.loads(content_block.input)
 								return ChatInvokeCompletion(
 									completion=output_format.model_validate(data),
 									usage=usage,
+									raw_content=raw_json_content
 								)
 							raise e
 

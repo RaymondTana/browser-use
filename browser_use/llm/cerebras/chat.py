@@ -70,7 +70,8 @@ class ChatCerebras(BaseChatModel):
 			)
 		else:
 			usage = None
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(
@@ -120,7 +121,8 @@ class ChatCerebras(BaseChatModel):
 				usage = self._get_usage(resp)
 				return ChatInvokeCompletion(
 					completion=resp.choices[0].message.content or '',
-					usage=usage,
+					# usage=usage,
+					usage = None
 				)
 			except RateLimitError as e:
 				raise ModelRateLimitError(str(e), model=self.name) from e
@@ -178,10 +180,15 @@ Your response must be valid JSON only, no other text.
 				else:
 					json_str = content
 
+				# Store raw JSON content before parsing
+				raw_json_content = json_str
+
 				parsed = output_format.model_validate_json(json_str)
 				return ChatInvokeCompletion(
 					completion=parsed,
-					usage=usage,
+					# usage=usage,
+					usage = None,
+					raw_content=raw_json_content
 				)
 			except RateLimitError as e:
 				raise ModelRateLimitError(str(e), model=self.name) from e

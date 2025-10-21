@@ -122,7 +122,8 @@ class ChatAnthropic(BaseChatModel):
 			prompt_cache_creation_tokens=response.usage.cache_creation_input_tokens,
 			prompt_image_tokens=None,
 		)
-		return usage
+		# return usage
+		return None
 
 	@overload
 	async def ainvoke(self, messages: list[BaseMessage], output_format: None = None) -> ChatInvokeCompletion[str]: ...
@@ -163,9 +164,13 @@ class ChatAnthropic(BaseChatModel):
 					# If it's not a text block, convert to string
 					response_text = str(first_content)
 
+				# return ChatInvokeCompletion(
+				# 	completion=response_text,
+				# 	usage=usage,
+				# )
 				return ChatInvokeCompletion(
 					completion=response_text,
-					usage=usage,
+					usage = None
 				)
 
 			else:
@@ -211,15 +216,23 @@ class ChatAnthropic(BaseChatModel):
 				for content_block in response.content:
 					if hasattr(content_block, 'type') and content_block.type == 'tool_use':
 						# Parse the tool input as the structured output
+						# Store raw JSON content before parsing
+						raw_json_content = json.dumps(content_block.input) if not isinstance(content_block.input, str) else content_block.input
 						try:
-							return ChatInvokeCompletion(completion=output_format.model_validate(content_block.input), usage=usage)
+							return ChatInvokeCompletion(
+								completion=output_format.model_validate(content_block.input),
+								usage=usage,
+								raw_content=raw_json_content
+							)
 						except Exception as e:
 							# If validation fails, try to parse it as JSON first
 							if isinstance(content_block.input, str):
 								data = json.loads(content_block.input)
 								return ChatInvokeCompletion(
 									completion=output_format.model_validate(data),
-									usage=usage,
+									# usage=usage,
+									usage=None,
+									raw_content=raw_json_content
 								)
 							raise e
 

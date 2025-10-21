@@ -3,9 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from browser_use.agent.message_manager.views import (
-	HistoryItem,
-)
 from browser_use.agent.prompts import AgentMessagePrompt
 from browser_use.agent.views import (
 	ActionResult,
@@ -20,6 +17,8 @@ from browser_use.llm.messages import (
 	ContentPartImageParam,
 	ContentPartTextParam,
 	SystemMessage,
+	UserMessage,
+	AssistantMessage
 )
 from browser_use.observability import observe_debug
 from browser_use.utils import match_url_with_domain_pattern, time_execution_sync
@@ -105,7 +104,6 @@ class MessageManager:
 		use_thinking: bool = True,
 		include_attributes: list[str] | None = None,
 		sensitive_data: dict[str, str | dict[str, str]] | None = None,
-		max_history_items: int | None = None,
 		vision_detail_level: Literal['auto', 'low', 'high'] = 'auto',
 		include_tool_call_examples: bool = False,
 		include_recent_events: bool = False,
@@ -117,13 +115,10 @@ class MessageManager:
 		self.file_system = file_system
 		self.sensitive_data_description = ''
 		self.use_thinking = use_thinking
-		self.max_history_items = max_history_items
 		self.vision_detail_level = vision_detail_level
 		self.include_tool_call_examples = include_tool_call_examples
 		self.include_recent_events = include_recent_events
 		self.sample_images = sample_images
-
-		assert max_history_items is None or max_history_items > 5, 'max_history_items must be None or greater than 5'
 
 		# Store settings as direct attributes instead of in a settings object
 		self.include_attributes = include_attributes or []
@@ -132,126 +127,19 @@ class MessageManager:
 		self.last_state_message_text: str | None = None
 		# Only initialize messages if state is empty
 		if len(self.state.history.get_messages()) == 0:
-			self._set_message_with_type(self.system_prompt, 'system')
-
-	@property
-	def agent_history_description(self) -> str:
-		"""Build agent history description from list of items, respecting max_history_items limit"""
-		if self.max_history_items is None:
-			# Include all items
-			return '\n'.join(item.to_string() for item in self.state.agent_history_items)
-
-		total_items = len(self.state.agent_history_items)
-
-		# If we have fewer items than the limit, just return all items
-		if total_items <= self.max_history_items:
-			return '\n'.join(item.to_string() for item in self.state.agent_history_items)
-
-		# We have more items than the limit, so we need to omit some
-		omitted_count = total_items - self.max_history_items
-
-		# Show first item + omitted message + most recent (max_history_items - 1) items
-		# The omitted message doesn't count against the limit, only real history items do
-		recent_items_count = self.max_history_items - 1  # -1 for first item
-
-		items_to_include = [
-			self.state.agent_history_items[0].to_string(),  # Keep first item (initialization)
-			f'<sys>[... {omitted_count} previous steps omitted...]</sys>',
-		]
-		# Add most recent items
-		items_to_include.extend([item.to_string() for item in self.state.agent_history_items[-recent_items_count:]])
-
-		return '\n'.join(items_to_include)
+			# <CHANGE>
+			self.state.history.add_message(self.system_prompt)
+			# </CHANGE>
 
 	def add_new_task(self, new_task: str) -> None:
 		new_task = '<follow_up_user_request> ' + new_task.strip() + ' </follow_up_user_request>'
 		if '<initial_user_request>' not in self.task:
 			self.task = '<initial_user_request>' + self.task + '</initial_user_request>'
 		self.task += '\n' + new_task
-		task_update_item = HistoryItem(system_message=new_task)
-		self.state.agent_history_items.append(task_update_item)
+		# Add task update directly to message history
+		task_update_message = UserMessage(content=new_task)
+		self.state.history.add_message(task_update_message)
 
-	def _update_agent_history_description(
-		self,
-		model_output: AgentOutput | None = None,
-		result: list[ActionResult] | None = None,
-		step_info: AgentStepInfo | None = None,
-	) -> None:
-		"""Update the agent history description"""
-
-		if result is None:
-			result = []
-		step_number = step_info.step_number if step_info else None
-
-		self.state.read_state_description = ''
-
-		action_results = ''
-		result_len = len(result)
-		read_state_idx = 0
-
-		for idx, action_result in enumerate(result):
-			if action_result.include_extracted_content_only_once and action_result.extracted_content:
-				self.state.read_state_description += (
-					f'<read_state_{read_state_idx}>\n{action_result.extracted_content}\n</read_state_{read_state_idx}>\n'
-				)
-				read_state_idx += 1
-				logger.debug(f'Added extracted_content to read_state_description: {action_result.extracted_content}')
-
-			if action_result.long_term_memory:
-				action_results += f'{action_result.long_term_memory}\n'
-				logger.debug(f'Added long_term_memory to action_results: {action_result.long_term_memory}')
-			elif action_result.extracted_content and not action_result.include_extracted_content_only_once:
-				action_results += f'{action_result.extracted_content}\n'
-				logger.debug(f'Added extracted_content to action_results: {action_result.extracted_content}')
-
-			if action_result.error:
-				if len(action_result.error) > 200:
-					error_text = action_result.error[:100] + '......' + action_result.error[-100:]
-				else:
-					error_text = action_result.error
-				action_results += f'{error_text}\n'
-				logger.debug(f'Added error to action_results: {error_text}')
-
-		# Simple 60k character limit for read_state_description
-		MAX_CONTENT_SIZE = 60000
-		if len(self.state.read_state_description) > MAX_CONTENT_SIZE:
-			self.state.read_state_description = (
-				self.state.read_state_description[:MAX_CONTENT_SIZE] + '\n... [Content truncated at 60k characters]'
-			)
-			logger.debug(f'Truncated read_state_description to {MAX_CONTENT_SIZE} characters')
-
-		self.state.read_state_description = self.state.read_state_description.strip('\n')
-
-		if action_results:
-			action_results = f'Result\n{action_results}'
-		action_results = action_results.strip('\n') if action_results else None
-
-		# Simple 60k character limit for action_results
-		if action_results and len(action_results) > MAX_CONTENT_SIZE:
-			action_results = action_results[:MAX_CONTENT_SIZE] + '\n... [Content truncated at 60k characters]'
-			logger.debug(f'Truncated action_results to {MAX_CONTENT_SIZE} characters')
-
-		# Build the history item
-		if model_output is None:
-			# Add history item for initial actions (step 0) or errors (step > 0)
-			if step_number is not None:
-				if step_number == 0 and action_results:
-					# Step 0 with initial action results
-					history_item = HistoryItem(step_number=step_number, action_results=action_results)
-					self.state.agent_history_items.append(history_item)
-				elif step_number > 0:
-					# Error case for steps > 0
-					history_item = HistoryItem(step_number=step_number, error='Agent failed to output in the right format.')
-					self.state.agent_history_items.append(history_item)
-		else:
-			history_item = HistoryItem(
-				step_number=step_number,
-				evaluation_previous_goal=model_output.current_state.evaluation_previous_goal,
-				memory=model_output.current_state.memory,
-				next_goal=model_output.current_state.next_goal,
-				action_results=action_results,
-			)
-			self.state.agent_history_items.append(history_item)
 
 	def _get_sensitive_data_description(self, current_page_url) -> str:
 		sensitive_data = self.sensitive_data
@@ -293,11 +181,17 @@ class MessageManager:
 	) -> None:
 		"""Create single state message with all content"""
 
+		# <CHANGE>
+
 		# Clear contextual messages from previous steps to prevent accumulation
-		self.state.history.context_messages.clear()
+		# self.state.history.context_messages.clear()
 
 		# First, update the agent history items with the latest step results
-		self._update_agent_history_description(model_output, result, step_info)
+		# self._update_agent_history_description(model_output, result, step_info)
+
+		# First, add action results from previous step if they exist
+		if result:
+			self._add_action_results_to_history(result)
 
 		# Use the passed sensitive_data parameter, falling back to instance variable
 		effective_sensitive_data = sensitive_data if sensitive_data is not None else self.sensitive_data
@@ -318,10 +212,7 @@ class MessageManager:
 					logger.debug('Screenshot inclusion requested by action result')
 					break
 
-		# Handle different use_vision modes:
-		# - "auto": Only include screenshot if explicitly requested by action (e.g., screenshot)
-		# - True: Always include screenshot
-		# - False: Never include screenshot
+		# Handle different use_vision modes
 		include_screenshot = False
 		if use_vision is True:
 			# Always include screenshot when use_vision=True
@@ -337,13 +228,11 @@ class MessageManager:
 		# Use vision in the user message if screenshots are included
 		effective_use_vision = len(screenshots) > 0
 
-		# Create single state message with all content
+		# Create state update message (NO agent_history_description or read_state_description!)
 		assert browser_state_summary
 		state_message = AgentMessagePrompt(
 			browser_state_summary=browser_state_summary,
 			file_system=self.file_system,
-			agent_history_description=self.agent_history_description,
-			read_state_description=self.state.read_state_description,
 			task=self.task,
 			include_attributes=self.include_attributes,
 			step_info=step_info,
@@ -359,8 +248,37 @@ class MessageManager:
 		# Store state message text for history
 		self.last_state_message_text = state_message.text
 
-		# Set the state message with caching enabled
-		self._set_message_with_type(state_message, 'state')
+		# Add the state message to history instead of replacing slot
+		self.state.history.add_message(state_message)
+
+		# </CHANGE>
+
+	def _add_action_results_to_history(
+		self,
+		result: list[ActionResult],
+	) -> None:
+		"""Add action results as a user message to history - append-only, no truncation"""
+
+		for action_result in result:
+			# Build complete result text with ALL fields, no conditional logic
+			result_parts = []
+
+			# Include extracted_content if present (no conditional flags)
+			if action_result.extracted_content:
+				result_parts.append(f'Extracted content:\n{action_result.extracted_content}')
+
+			# Include long_term_memory if present
+			if action_result.long_term_memory:
+				result_parts.append(f'Long-term memory:\n{action_result.long_term_memory}')
+
+			# Include FULL error with NO truncation
+			if action_result.error:
+				result_parts.append(f'Error:\n{action_result.error}')
+
+			# Add each action result as a separate message
+			if result_parts:
+				result_message = UserMessage(content='\n\n'.join(result_parts))
+				self.state.history.add_message(result_message)
 
 	def _log_history_lines(self) -> str:
 		"""Generate a formatted log string of message history for debugging / printing to terminal"""
@@ -408,20 +326,10 @@ class MessageManager:
 		self.last_input_messages = self.state.history.get_messages()
 		return self.last_input_messages
 
-	def _set_message_with_type(self, message: BaseMessage, message_type: Literal['system', 'state']) -> None:
-		"""Replace a specific state message slot with a new message"""
-		# Don't filter system and state messages - they should contain placeholder tags or normal conversation
-		if message_type == 'system':
-			self.state.history.system_message = message
-		elif message_type == 'state':
-			self.state.history.state_message = message
-		else:
-			raise ValueError(f'Invalid state message type: {message_type}')
-
 	def _add_context_message(self, message: BaseMessage) -> None:
 		"""Add a contextual message specific to this step (e.g., validation errors, retry instructions, timeout warnings)"""
-		# Don't filter context messages - they should contain normal conversation or error messages
-		self.state.history.context_messages.append(message)
+		# Don't filter context messages
+		self.state.history.add_message(message)
 
 	@time_execution_sync('--filter_sensitive_data')
 	def _filter_sensitive_data(self, message: BaseMessage) -> BaseMessage:
